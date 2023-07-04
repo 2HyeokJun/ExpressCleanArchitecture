@@ -1,11 +1,22 @@
 const LoginRouter = require('./loginRouter');
 const MissingParamError = require('../error/MissingParamError');
 const UnauthorizedError = require('../error/UnauthorizedError');
+const InternalServerError = require('../error/InternalServerError');
 
 const statusCode = require('../statusCode');
-// const InternalServerError = require('../error/InternalServerError');
+
 
 const makeSut = () => {
+    const authUseCaseSpy = makeAuthUseCase();
+    authUseCaseSpy.accessToken = 'valid_access_token';
+    const sut = new LoginRouter(authUseCaseSpy);
+    return {
+        sut,
+        authUseCaseSpy,
+    }
+}
+
+const makeAuthUseCase = () => {
     class AuthUseCaseSpy {
         auth (email, password) {
             this.email = email;
@@ -14,14 +25,18 @@ const makeSut = () => {
             return this.accessToken;
         }
     }
-    const authUseCaseSpy = new AuthUseCaseSpy();
-    authUseCaseSpy.accessToken = 'valid_access_token';
-    const sut = new LoginRouter(authUseCaseSpy);
-    return {
-        sut,
-        authUseCaseSpy,
-    }
+    return new AuthUseCaseSpy();
 }
+
+const makeAuthUseCaseWithError = () => {
+    class AuthUseCaseSpy {
+        auth () {
+            throw new Error();
+        }
+    }
+    return new AuthUseCaseSpy();
+}
+
 
 describe('loginRouter', () => {
     test('should return 200 when valid credentials are provided', () => {
@@ -84,14 +99,15 @@ describe('loginRouter', () => {
         const {sut, authUseCaseSpy} = makeSut();
         const httpRequest = {
             body: {
-                email: 'email@email.com',
-                password: 'password',
+                email: 'invalid_email@email.com',
+                password: 'invalid_password',
             }
         };
-        const httpResponse = sut.route(httpRequest);
         authUseCaseSpy.accessToken = null;
+        const httpResponse = sut.route(httpRequest);
         
         expect(httpResponse.statusCode).toBe(statusCode.Unauthorized);
+        expect(httpResponse.body).toEqual(new UnauthorizedError());
 
     })
 
@@ -100,10 +116,20 @@ describe('loginRouter', () => {
         const httpResponse = sut.route({});
         
         expect(httpResponse.statusCode).toBe(statusCode.InternalServerError);
+        expect(httpResponse.body).toEqual(new InternalServerError());
+    })
+
+    test('should return 500 if httpRequest has no body', () => {
+        const sut = new LoginRouter();
+        const httpResponse = sut.route({});
+
+        expect(httpResponse.statusCode).toBe(statusCode.InternalServerError);
+        expect(httpResponse.body).toEqual(new InternalServerError());
     })
 
     test('should return 500 if no AuthUseCase is provided', () => {
-        const {sut} = makeSut();
+        // const {sut} = makeSut();
+        const sut = new LoginRouter();
         const httpRequest = {
             body: {
                 email: 'email@email.com',
@@ -131,13 +157,7 @@ describe('loginRouter', () => {
     })
 
     test('should return 500 if AuthUseCase throws', () => {
-        class AuthUseCaseSpy {
-            auth () {
-                throw new Error();
-            }
-        }
-        const authUseCaseSpy = new AuthUseCaseSpy();
-        authUseCaseSpy.accessToken = 'valid_access_token';
+        const authUseCaseSpy = makeAuthUseCaseWithError();
         const sut = new LoginRouter(authUseCaseSpy);
         const httpRequest = {
             body: {
@@ -145,9 +165,9 @@ describe('loginRouter', () => {
                 password: 'password',
             }
         }
-        return {
-            sut,
-            authUseCaseSpy,
-        }
+        const httpResponse = sut.route(httpRequest);
+
+        expect(httpResponse.statusCode).toBe(statusCode.InternalServerError);
+        expect(httpResponse.body).toEqual(new InternalServerError());
     })
 })
